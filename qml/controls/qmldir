@@ -1,0 +1,11 @@
+module StellaMora.Controls
+AsterButton 1.0 AsterButton.qml
+AsterIconButton 1.0 AsterIconButton.qml
+AsterSwitch 1.0 AsterSwitch.qml
+AsterSegmentedControl 1.0 AsterSegmentedControl.qml
+AsterGroup 1.0 AsterGroup.qml
+AsterSettingRow 1.0 AsterSettingRow.qml
+SettingsPage 1.0 SettingsPage.qml
+
+DesktopButton 1.0 DesktopButton.qml
+DesktopField 1.0 DesktopField.qml

@@ -1,0 +1,48 @@
+# Build output, deployment packages, screenshots and local backups
+/out/
+/build/
+/build-*/
+/cmake-build-*/
+/dist/
+/deploy/
+/release/
+/artifacts/
+
+# Machine-specific IDE and Qt settings
+/.vs/
+/.idea/
+/.vscode/
+/CMakeUserPresets.json
+/CMakeSettings.json
+*.user
+*.suo
+
+# In-source CMake/compiler output
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/CTestTestfile.cmake
+/Testing/
+/.qt/
+/.rcc/
+/.ninja_deps
+/.ninja_log
+/build.ninja
+*.obj
+*.o
+*.pdb
+*.ilk
+
+# Local planning history; not needed to build the application
+/docs/
+
+# Local secrets and temporary files
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.bak
+__pycache__/
+.DS_Store
+Thumbs.db

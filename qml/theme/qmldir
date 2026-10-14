@@ -1,0 +1,2 @@
+module StellaMora.Theme
+singleton AsterTheme 1.0 AsterTheme.qml

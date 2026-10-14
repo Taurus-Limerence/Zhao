@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: #070b0e; overflow: hidden; }
+  #aladin { width: 100%; height: 100%; }
+  /* Keep browser-owned coordinate selectors consistent with the Qt controls. */
+  :root { color-scheme: dark; }
+  #aladin select {
+    color-scheme: dark;
+    background: #10181d !important; color: #d8d8dc !important;
+    border: 1px solid #394b56 !important; border-radius: 3px;
+    font: 11px system-ui, sans-serif !important;
+  }
+  #aladin select option, #aladin select optgroup {
+    background: #10181d !important; color: #d8d8dc !important;
+  }
+  #aladin select:focus { outline: 1px solid #2f9def; }
+  #fallback {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    color: #818b94; font: 13px system-ui, sans-serif; text-align: center;
+  }
+  #fallback button {
+    background: #11181d; color: #d8d8dc; border: 1px solid #3a4249;
+    border-radius: 4px; padding: 6px 18px; cursor: pointer; font-size: 13px;
+  }
+  #fallback button:hover { border-color: #2f9def; color: #ffffff; }
+  .hidden { display: none !important; }
+</style>
+<script>
+// Defined before the survey script tag so load-failure handlers always find them.
+window.stellaReady = "loading";
+window.stellaMessage = "正在加载巡天引擎";
+let aladin = null;
+let overlay = null;
+let mountCatalog = null;
+let solvedOverlay = null;
+window.stellaSolved = function(corners) {
+  if (!aladin) return;
+  if (!solvedOverlay) {
+    solvedOverlay = A.graphicOverlay({name: "照片解析视场 J2000", color: "#61c99b", lineWidth: 2});
+    aladin.addOverlay(solvedOverlay);
+  }
+  solvedOverlay.removeAll();
+  if (Array.isArray(corners) && corners.length === 4 && corners.every(p =>
+      Array.isArray(p) && p.length === 2 && p.every(Number.isFinite)))
+    solvedOverlay.addFootprints([A.polygon(corners, {color: "#61c99b", strokeWidth: 2, fillOpacity: 0})]);
+};
+window.stellaInspectPhoto = function(result) {
+  if (!aladin || !result || !Number.isFinite(result.raHours) || !Number.isFinite(result.decDeg)) return;
+  aladin.gotoRaDec(result.raHours*15, result.decDeg);
+  aladin.setFoV(Math.max(result.widthDeg,result.heightDeg)*2.2);
+};
+window.stellaMount = function (position) {
+  if (!aladin) return;
+  if (!mountCatalog) {
+    mountCatalog = A.catalog({name: "赤道仪实际指向", color: "#f0b85b", sourceSize: 20, shape: "cross"});
+    aladin.addCatalog(mountCatalog);
+  }
+  mountCatalog.removeAll();
+  if (position && position.every(Number.isFinite))
+    mountCatalog.addSources([A.source(position[0], position[1], {name: "赤道仪实际指向"})]);
+};
+window.stellaInspectMount = function (position) {
+  if (!aladin || !Array.isArray(position) || position.length !== 2 || !position.every(Number.isFinite)
+      || position[0] < 0 || position[0] >= 360 || Math.abs(position[1]) > 90) return;
+  aladin.gotoRaDec(position[0], position[1]);
+};
+
+function showFailure(message) {
+  if (window.stellaReady === "ready") return;
+  window.stellaReady = "error";
+  window.stellaMessage = message;
+  console.error(message);
+  document.getElementById("aladin").classList.add("hidden");
+  document.getElementById("fallback").classList.remove("hidden");
+  document.getElementById("fallbackText").textContent = message;
+  document.getElementById("retry").classList.remove("hidden");
+}
+
+function boot() {
+  if (typeof A === "undefined") return;
+  A.init.then(function () {
+    if (window.stellaReady === "error") return;
+    aladin = A.aladin("#aladin", {
+      fov: 2.0,
+      survey: "P/DSS2/color",
+      projection: "SIN",
+      cooFrame: "equatorial",
+      // StellaMora owns every control: the web view renders imagery only,
+      // so its built-in widgets never collide with the QML toolbar/info bar.
+      showReticle: false,
+      showCooGrid: false,
+      showCooGridControl: false,
+      showCooLocation: false,
+      showScale: false,
+      showSettingsControl: false,
+      showLayersControl: false,
+      showSimbadPointerControl: false,
+      showFullscreenControl: false,
+      showProjectionControl: false,
+      showFrameControl: false,
+      showZoomControl: false,
+      showContextMenu: false,
+      backgroundColor: "#070b0e"
+    });
+    overlay = A.graphicOverlay({ color: "#2f9def", lineWidth: 2 });
+    aladin.addOverlay(overlay);
+    window.stellaCurrentSurveyId = "P/DSS2/color";
+    window.stellaReady = "ready";
+    window.stellaMessage = "引擎已就绪，巡天影像按需加载";
+    document.getElementById("fallback").classList.add("hidden");
+  }).catch(function (error) {
+    showFailure("巡天引擎初始化失败：" + error);
+  });
+}
+
+// Primary CDS host is frequently unreachable from mainland networks; fall
+// back to the jsDelivr mirror once before giving up.
+let cdnFallbackUsed = false;
+
+</script>
+</head>
+<body>
+<div id="aladin"></div>
+<div id="fallback">
+  <div id="fallbackText">巡天参考影像加载中…（需联网）</div>
+  <button id="retry" class="hidden" onclick="location.reload()">重试</button>
+</div>
+<script>
+const bootTimeout = setTimeout(function () {
+  if (window.stellaReady === "loading") showFailure("巡天影像加载超时，请检查网络后重试。");
+}, 30000);
+
+function drawFrame(cornersJson) {
+  try {
+    const corners = JSON.parse(cornersJson);
+    if (!Array.isArray(corners) || corners.length !== 4) {
+      console.error("视场框更新跳过：角点数据非法（长度 " + (corners ? corners.length : "null") + "）");
+      return;
+    }
+    overlay.removeAll();
+    // Explicit styling: newer "latest" builds changed polygon defaults,
+    // which once rendered the frame invisible.
+    overlay.addFootprints([A.polygon(corners, {
+      color: "#2f9def",
+      strokeWidth: 2,
+      fillColor: "#2f9def",
+      fillOpacity: 0.06
+    })]);
+    console.info("[StellaMora] 视场框已绘制");
+  } catch (error) {
+    console.error("视场框更新失败", error);
+  }
+}
+
+// Selecting a target: recenter, frame the neighbourhood, draw the footprint.
+window.stellaGoto = function (raDeg, decDeg, cornersJson, fovDeg) {
+  if (!aladin) return;
+  try {
+    aladin.gotoRaDec(raDeg, decDeg);
+    if (typeof aladin.setFoV === "function" && fovDeg > 0) aladin.setFoV(fovDeg * 2.2);
+    drawFrame(cornersJson);
+  } catch (error) {
+    console.error("构图定位失败", error);
+  }
+};
+
+// Instrument/angle edits: redraw the footprint only — browsing position and
+// zoom stay exactly where the user left them, no jumping.
+window.stellaFrame = function (cornersJson) {
+  if (!aladin) return;
+  drawFrame(cornersJson);
+};
+
+// Two workspace modes: browsing is a wide stereographic sky (curved grid,
+// spherical feel); framing is the small-field capture planner (SIN, precise
+// footprint). The view center carries over between modes.
+window.stellaMode = function (mode, browseFovDeg) {
+  if (!aladin) return;
+  try {
+    if (mode === "browse") {
+      if (typeof aladin.setProjection === "function") aladin.setProjection("STG");
+      if (typeof aladin.setFoV === "function") aladin.setFoV(browseFovDeg > 0 ? browseFovDeg : 60);
+    } else {
+      if (typeof aladin.setProjection === "function") aladin.setProjection("SIN");
+    }
+  } catch (error) {}
+};
+
+// Rotates the whole sky view (browsing aid) — distinct from the camera
+// position angle that rotates the capture frame.
+window.stellaViewRotation = function (deg) {
+  if (!aladin || typeof aladin.setRotation !== "function") return;
+  try { aladin.setRotation(deg); } catch (error) {}
+};
+
+// Fit command from the QML toolbar; the survey view owns its own zoom.
+window.stellaFit = function (fovDeg) {
+  // fovDeg arrives precomputed for the window aspect and rotation.
+  if (!aladin || typeof aladin.setFoV !== "function" || !(fovDeg > 0)) return;
+  aladin.setFoV(fovDeg);
+};
+
+// QML toolbar toggles; the grid is rendered by Aladin, the frame visibility
+// keeps the footprint and the QML fallback box in the same on/off state.
+window.stellaGrid = function (visible) {
+  // v3 API: setCooGrid takes an options object; "showCooGrid" does not exist.
+  if (!aladin || typeof aladin.setCooGrid !== "function") return;
+  aladin.setCooGrid({ enabled: visible === true, color: "#e8e8e8" });
+};
+
+window.stellaFrameVisible = function (visible) {
+  // GraphicOverlay is driven by show()/hide() (with isShowing as state);
+  // assigning a "visible" property only decorates the object, the renderer
+  // never reads it.
+  if (!overlay) return;
+  if (visible) overlay.show();
+  else overlay.hide();
+};
+
+// Ground truth about the imagery: which survey the view actually shows and
+// whether a base layer exists at all. isStillActive() is NOT part of this
+// engine build, so nothing here may rely on it.
+window.stellaStatus = function () {
+  let surveyId = null;
+  let hasBase = false;
+  if (aladin && typeof aladin.getBaseImageLayer === "function") {
+    try {
+      const base = aladin.getBaseImageLayer();
+      hasBase = !!base;
+      if (base && typeof base.id !== "undefined" && base.id !== null) surveyId = String(base.id);
+    } catch (error) {}
+  }
+  return JSON.stringify({surveyId: surveyId, hasBase: hasBase});
+};
+
+// The survey actually on screen (only updated after a successful switch).
+window.stellaCurrentSurvey = function () {
+  return window.stellaCurrentSurveyId || null;
+};
+
+// Current view center in degrees [raDeg, decDeg]; null before the engine
+// exists. The QML layer feeds this back into the planner so saved
+// compositions record where the user actually framed.
+window.stellaCenter = function () {
+  if (!aladin || typeof aladin.getRaDec !== "function") return null;
+  const center = aladin.getRaDec();
+  return Array.isArray(center) && center.length === 2 ? center : null;
+};
+
+// Pinned Aladin 3.8.2 observes the container, not synthetic window resize
+// events. Refresh its canvas geometry after Chromium applies QML layout.
+let resizePending = false;
+window.stellaNudgeResize = function () {
+  if (!aladin || resizePending) return;
+  resizePending = true;
+  requestAnimationFrame(function () {
+    resizePending = false;
+    try {
+      const view = aladin.view;
+      if (view && typeof view.fixLayoutDimensions === "function") {
+        view.fixLayoutDimensions();
+        view.requestRedraw();
+      }
+    } catch (error) {
+      console.warn("巡天画布尺寸刷新失败", error);
+    }
+  });
+};
+
+// Survey source switch from the QML toolbar. The switch is async inside
+// Aladin; a mirror that refuses to load must keep the previous survey up.
+window.stellaSurvey = function (hipsId) {
+  if (!aladin) return;
+  try {
+    let request = null;
+    if (typeof aladin.setImageSurvey === "function") request = aladin.setImageSurvey(hipsId);
+    else if (typeof aladin.setSurvey === "function") request = aladin.setSurvey(hipsId);
+    if (request && typeof request.then === "function") {
+      request.then(function () { window.stellaCurrentSurveyId = hipsId; },
+                   function (error) { console.warn("巡天源切换失败，保留当前源：", error); });
+      return;
+    }
+    // Synchronous success path (or promise already settled): record it.
+    window.stellaCurrentSurveyId = hipsId;
+  } catch (error) {}
+};
+
+window.stellaReticle = function (visible) {
+  if (aladin && typeof aladin.showReticle === "function") aladin.showReticle(visible);
+};
+
+// The engine ships with the application (pinned 3.8.2, ES module): script
+// loading never touches the network. Only imagery tiles need connectivity.
+async function startEngine() {
+  try {
+    window.A = (await import("./aladin-lite.mjs")).default;
+  } catch (bundledError) {
+    console.warn("内置引擎加载失败，尝试 CDN：", bundledError);
+    try {
+      window.A = (await import("https://cdn.jsdelivr.net/npm/aladin-lite@3.8.2/dist/aladin.js")).default;
+    } catch (cdnError) {
+      showFailure("无法初始化巡天引擎，请重启应用重试。");
+      return;
+    }
+  }
+  if (window.stellaReady === "error") return;
+  boot();
+}
+startEngine();
+</script>
+</body>
+</html>
